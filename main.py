@@ -402,15 +402,24 @@ class MusicPluginEnhanced(Star):
         当用户想听「某个网易云用户的歌」「某人喜欢的歌」「某人歌单」时调用此工具。
         会先根据 user_identifier 搜索网易云用户（昵称或用户ID），再播放该用户「我喜欢的音乐」中的一首；
         推送顺序为先新后旧，同一会话多次调用会按顺序往后推。
-        示例：用户说「播放 张三 喜欢的歌」「来首网易云用户 123456 的歌」「搜一下用户 xxx 的歌」→ 传入对应用户昵称或ID。
+        示例：用户说「播放 张三 喜欢的歌」「来首网易云用户 acane麦外敷 的歌」→ 传入「张三」或「acane麦外敷」（不要带「用户」二字）。
         Args:
-            user_identifier(string): 网易云用户昵称（如「张三」）或用户ID（纯数字字符串，如「123456」）
+            user_identifier(string): 网易云用户昵称或用户ID（纯数字）。仅传昵称/ID，不要包含「用户」「网易云用户」等前缀。
         """
         if not user_identifier or not user_identifier.strip():
             yield event.plain_result("请提供网易云用户昵称或用户ID哦~")
             return
 
+        # 规范参数：去掉句首「用户」字样，避免 LLM 传入「用户acane麦外敷」导致搜索不一致
         raw = user_identifier.strip()
+        for prefix in ("用户", "网易云用户", "网易云 "):
+            if raw.startswith(prefix):
+                raw = raw[len(prefix):].strip()
+                break
+        if not raw:
+            yield event.plain_result("请提供网易云用户昵称或用户ID哦~")
+            return
+
         chat_k = _chat_key(event)
 
         # 若为纯数字视为 uid
