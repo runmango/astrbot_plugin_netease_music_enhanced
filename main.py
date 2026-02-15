@@ -24,7 +24,7 @@ def _chat_key(event) -> str:
     "astrbot_plugin_NetEase_Music_Enhanced",
     "YourName",
     "网易云点歌增强：换一首不重复、歌手随机、用户喜欢推送（先新后旧）",
-    "1.0.0",
+    "1.0.1",
 )
 class MusicPluginEnhanced(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
