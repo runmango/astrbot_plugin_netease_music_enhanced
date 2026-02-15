@@ -203,12 +203,12 @@ class MusicPluginEnhanced(Star):
                 logger.warning(f"网易云用户搜索请求异常 第{attempt + 1}次: {e}")
         return []
 
-    async def netease_user_playlists(self, uid: str) -> list[dict]:
-        """获取用户歌单列表。第一个通常为「我喜欢的音乐」。"""
+    async def netease_user_playlists(self, uid: str, limit: int = 15) -> list[dict]:
+        """获取用户歌单列表。第一个通常为「我喜欢的音乐」，后面为创建的歌单。"""
         url = "http://music.163.com/api/user/playlist"
         try:
             result = await self._netease_request(
-                f"{url}?uid={uid}&limit=1&offset=0",
+                f"{url}?uid={uid}&limit={limit}&offset=0",
                 method="GET",
             )
             if not isinstance(result, dict):
@@ -399,10 +399,12 @@ class MusicPluginEnhanced(Star):
         self, event: AiocqhttpMessageEvent, user_identifier: str
     ) -> MessageEventResult:
         """
-        根据网易云用户（昵称或用户ID）播放该用户「我喜欢的音乐」中的一首。
-        推送顺序：先推送最新的喜欢，再推送较旧的；多次调用会按顺序往后推。
+        当用户想听「某个网易云用户的歌」「某人喜欢的歌」「某人歌单」时调用此工具。
+        会先根据 user_identifier 搜索网易云用户（昵称或用户ID），再播放该用户「我喜欢的音乐」中的一首；
+        推送顺序为先新后旧，同一会话多次调用会按顺序往后推。
+        示例：用户说「播放 张三 喜欢的歌」「来首网易云用户 123456 的歌」「搜一下用户 xxx 的歌」→ 传入对应用户昵称或ID。
         Args:
-            user_identifier(string): 网易云用户昵称或用户ID（数字字符串）
+            user_identifier(string): 网易云用户昵称（如「张三」）或用户ID（纯数字字符串，如「123456」）
         """
         if not user_identifier or not user_identifier.strip():
             yield event.plain_result("请提供网易云用户昵称或用户ID哦~")
@@ -425,19 +427,35 @@ class MusicPluginEnhanced(Star):
 
         playlists = await self.netease_user_playlists(uid)
         if not playlists:
-            yield event.plain_result(f"该用户暂无公开歌单或「喜欢」列表不可用")
+            yield event.plain_result("该用户暂无公开歌单或「喜欢」列表不可用")
             return
 
-        # 第一个歌单通常为「我喜欢的音乐」
-        first_pl = playlists[0]
-        pl_id = str(first_pl.get("id", ""))
-        if not pl_id:
-            yield event.plain_result("无法获取该用户的喜欢歌单")
-            return
+        # 依次尝试歌单：优先「我喜欢的音乐」（第一个），若为空则尝试后续公开歌单（网易云未登录时常不返回「喜欢」曲目）
+        tracks = []
+        for pl in playlists:
+            pl_id = str(pl.get("id", ""))
+            pl_name = (pl.get("name") or "歌单").strip()
+            if not pl_id:
+                continue
+            detail_tracks = await self.netease_playlist_detail(pl_id)
+            if detail_tracks:
+                tracks = detail_tracks
+                if pl is playlists[0]:
+                    logger.info(f"[NetEaseMusicEnhanced] 用户 {nickname}({uid}) 使用「我喜欢的音乐」")
+                else:
+                    logger.info(f"[NetEaseMusicEnhanced] 用户 {nickname}「我喜欢的音乐」无曲目，改用歌单「{pl_name}」")
+                break
+            if pl is playlists[0]:
+                logger.warning(
+                    f"[NetEaseMusicEnhanced] 用户 {nickname}({uid}) 歌单「{pl_name}」返回 0 首，"
+                    "可能为隐私或未登录无法获取，将尝试其他歌单"
+                )
 
-        tracks = await self.netease_playlist_detail(pl_id)
         if not tracks:
-            yield event.plain_result("该用户喜欢的音乐列表为空或无法获取")
+            yield event.plain_result(
+                "该用户的歌单暂时无法获取（网易云「我喜欢的音乐」多为隐私，未登录时无法读取）。"
+                "可尝试提供其他网易云用户，或请该用户将「我喜欢的音乐」设为公开。"
+            )
             return
 
         track = self._get_user_liked_track(chat_k, uid, tracks)
