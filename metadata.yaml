@@ -1,6 +1,6 @@
 name: astrbot_plugin_NetEase_Music_Enhanced
 display_name: 网易云点歌增强版
 desc: 【QQ】自然语言点歌、换一首、按歌手随机、按网易云用户喜欢推送（先新后旧）
-version: V1.0.0
-author: YourName
-repo: ""
+version: V1.0.1
+author: 枫雪
+repo: "https://github.com/runmango/astrbot_plugin_netease_music_enhanced.git"

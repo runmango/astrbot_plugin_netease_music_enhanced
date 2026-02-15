@@ -231,34 +231,32 @@ class MusicPluginEnhanced(Star):
             )
             if not isinstance(result, dict):
                 return []
-            pl = result.get("result", result)
+            # 兼容 result 或 result.playlist 等结构
+            pl = result.get("result") or result.get("playlist") or result
             if not isinstance(pl, dict):
+                logger.warning(f"[NetEaseMusicEnhanced] 歌单详情 result 非 dict: id={playlist_id}")
                 return []
-            # trackIds: [ { id, t (添加时间 ms) }, ... ]，按 t 倒序=先新后旧
             track_ids = pl.get("trackIds", [])
             tracks = pl.get("tracks", [])
             if not isinstance(track_ids, list):
                 track_ids = []
             if not isinstance(tracks, list):
                 tracks = []
-
-            # 有 trackIds 时按 t 排序（新在前）
-            if track_ids and isinstance(track_ids[0], dict):
-                track_ids_sorted = sorted(
-                    track_ids,
-                    key=lambda x: (x.get("t") or 0),
-                    reverse=True,
+            # 未登录时部分接口只返回 tracks 不返回 trackIds，打日志便于排查
+            if not track_ids and not tracks:
+                logger.debug(
+                    f"[NetEaseMusicEnhanced] 歌单 id={playlist_id} 无曲目 "
+                    f"(result.keys={list(pl.keys())[:10]})"
                 )
-                id_order = [str(t["id"]) for t in track_ids_sorted]
-            else:
-                id_order = [str(t.get("id", t) if isinstance(t, dict) else t) for t in track_ids]
 
-            # 用 tracks 拼信息，不足时只保留 id 列表，播时用 id 即可
+            # 用 tracks 拼信息
             track_map = {}
             for t in tracks:
                 if not isinstance(t, dict):
                     continue
                 tid = str(t.get("id", ""))
+                if not tid:
+                    continue
                 track_map[tid] = {
                     "id": t.get("id"),
                     "name": t.get("name", "未知"),
@@ -267,6 +265,21 @@ class MusicPluginEnhanced(Star):
                         if isinstance(a, dict)
                     ) or "未知",
                 }
+
+            # 有 trackIds 时按 t 排序（新在前）；未登录时 API 常只返回 tracks 不返回 trackIds，则直接用 tracks 顺序
+            if track_ids and isinstance(track_ids[0], dict):
+                track_ids_sorted = sorted(
+                    track_ids,
+                    key=lambda x: (x.get("t") or 0),
+                    reverse=True,
+                )
+                id_order = [str(t["id"]) for t in track_ids_sorted]
+            elif track_ids:
+                id_order = [str(t.get("id", t) if isinstance(t, dict) else t) for t in track_ids]
+            else:
+                # 仅当无 trackIds 时用 tracks 顺序（未登录时常见）
+                id_order = list(track_map.keys())
+
             out = []
             for tid in id_order:
                 if tid in track_map:
