@@ -1,0 +1,14 @@
+{
+  "play_success_message_template": {
+    "type": "string",
+    "description": "点歌成功后的回复（留空则不发送）",
+    "hint": "支持变量：{title}、{artist}。默认留空，不提示「已为您播放」",
+    "default": ""
+  },
+  "proxy_url": {
+    "type": "string",
+    "description": "HTTP/HTTPS/SOCKS 代理地址（可选）",
+    "hint": "示例：http://ip:port 或 socks5://user:pass@ip:port",
+    "default": ""
+  }
+}
