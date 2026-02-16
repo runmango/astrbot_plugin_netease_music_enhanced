@@ -1,6 +1,6 @@
 # NetEase Cloud Music Enhanced · 网易云点歌增强版
 
-[![Plugin Version](https://img.shields.io/badge/version-1.0.2-blue.svg)](#)
+[![Plugin Version](https://img.shields.io/badge/version-v1.0.2-blue.svg)](#)
 [![AstrBot](https://img.shields.io/badge/AstrBot-Plugin-ff69b4)](https://github.com/AstrBotDevs/AstrBot)
 [![Platform](https://img.shields.io/badge/platform-QQ-NapCat)](https://napcat.napneko.icu/)
 [![License](https://img.shields.io/badge/license-AGPL%203.0-green.svg)](LICENSE)
