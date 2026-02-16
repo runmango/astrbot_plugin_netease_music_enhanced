@@ -1,6 +1,6 @@
 # NetEase Cloud Music Enhanced · 网易云点歌增强版
 
-[![Plugin Version](https://img.shields.io/badge/version-1.0.1-blue.svg)](#)
+[![Plugin Version](https://img.shields.io/badge/version-1.0.2-blue.svg)](#)
 [![AstrBot](https://img.shields.io/badge/AstrBot-Plugin-ff69b4)](https://github.com/AstrBotDevs/AstrBot)
 [![Platform](https://img.shields.io/badge/platform-QQ-NapCat)](https://napcat.napneko.icu/)
 [![License](https://img.shields.io/badge/license-AGPL%203.0-green.svg)](LICENSE)
@@ -34,6 +34,7 @@ An enhanced NetEase Cloud Music plugin for [AstrBot](https://astrbot.app): natur
 | **Artist-only shuffle** | 仅提歌手（如「放周杰伦的歌」）时，从该歌手歌曲中随机选一首，并避免与近期播放重复。 |
 | **No “played” announcement** | 默认不发送「已为您播放《xxx》」；可在配置中自定义或留空。 |
 | **User’s liked songs** | 支持按网易云用户（昵称或 ID）播放其「我喜欢的音乐」；推送顺序为**先新后旧**，同一会话内按顺序依次推送。 |
+| **User’s liked music analysis** | 分析指定网易云用户的歌单（喜欢/公开歌单）：曲目总数、歌手分布（Top N）、偏好简述。 |
 
 ---
 
@@ -133,6 +134,18 @@ pip install aiohttp-socks
 
 ---
 
+### 4. `analyze_netease_user_liked_music(user_identifier)`
+
+分析指定网易云用户的歌单（「我喜欢的音乐」或第一个有曲目的公开歌单），输出统计与偏好分析。
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `user_identifier` | string | 是 | 网易云用户**昵称**或**用户 ID**（仅传昵称/ID，不要带「用户」等前缀）。 |
+
+分析内容：**歌单概况**（曲目总数）、**歌手分布**（按出现次数 Top 15，含占比）、**偏好简述**（最常出现的歌手等）。用户说「分析一下 xxx 的歌单」「统计用户 xxx 的听歌喜好」时调用。
+
+---
+
 ## Examples · 示例
 
 | 用户说法 | 行为 |
@@ -142,6 +155,7 @@ pip install aiohttp-socks
 | 放周杰伦的歌 / 来首孙燕姿的 | 仅按歌手搜索，随机一首并避免重复 |
 | 换一首 / 再来一首 | 从上一轮列表换一首；列表播完则重新搜索再随机 |
 | 播放 xxx 喜欢的歌 | 搜索网易云用户 xxx，从其「喜欢」列表按先新后旧推送一首 |
+| 分析一下 xxx 的歌单 / 统计用户 xxx 的听歌喜好 | 获取该用户歌单并输出曲目数、歌手分布、偏好简述 |
 
 ---
 
@@ -174,6 +188,7 @@ A: 网易云对未登录请求**不返回**「我喜欢的音乐」里的曲目�
 1. **换一首不重复**：通过 `change_netease_song` 从上一轮列表中换歌，避免重复。
 2. **仅提歌手时随机**：LLM 传 `only_artist=True` 时从该歌手歌曲中随机选曲并记录已播。
 3. **默认不播报「已为您播放」**：成功提示模板默认留空，可按需在配置中自定义。
-4. **按用户喜欢推送**：支持搜索网易云用户并按其「我喜欢的音乐」列表**先新后旧**顺序推送。
+4. **按用户喜欢推送**：支持搜索网易云用户并按其「我喜欢的音乐」列表**先新后旧**顺序推送。  
+5. **用户歌单分析**：分析指定用户的喜欢/歌单，输出曲目总数、歌手分布（Top 15）、偏好简述。
 
 插件 ID：`astrbot_plugin_NetEase_Music_Enhanced`。安装后请在 AstrBot 中启用并配置代理（若在海外部署）。

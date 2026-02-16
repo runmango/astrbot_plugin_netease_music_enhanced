@@ -24,7 +24,7 @@ def _chat_key(event) -> str:
     "astrbot_plugin_NetEase_Music_Enhanced",
     "YourName",
     "网易云点歌增强：换一首不重复、歌手随机、用户喜欢推送（先新后旧）",
-    "1.0.1",
+    "1.0.2",
 )
 class MusicPluginEnhanced(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
@@ -304,6 +304,97 @@ class MusicPluginEnhanced(Star):
         self._user_liked_index[key] = idx + 1
         return track
 
+    def _normalize_user_identifier(self, user_identifier: str) -> str:
+        """去掉「用户」「网易云用户」等前缀，返回纯昵称或 ID。"""
+        raw = (user_identifier or "").strip()
+        for prefix in ("用户", "网易云用户", "网易云 "):
+            if raw.startswith(prefix):
+                raw = raw[len(prefix):].strip()
+                break
+        return raw
+
+    async def _get_user_liked_playlist_tracks(
+        self, user_identifier: str
+    ) -> tuple[str | None, str | None, list[dict], str]:
+        """
+        根据用户昵称或 ID 解析用户并获取其「喜欢」或第一个有曲目的歌单。
+        返回 (uid, nickname, tracks, playlist_name)；失败时 tracks 为空、uid 可为 None。
+        """
+        raw = self._normalize_user_identifier(user_identifier)
+        if not raw:
+            return None, None, [], ""
+
+        if raw.isdigit():
+            uid, nickname = raw, raw
+        else:
+            users = await self.netease_search_user(raw, limit=5)
+            if not users:
+                return None, None, [], ""
+            uid = users[0]["userId"]
+            nickname = users[0]["nickname"]
+
+        playlists = await self.netease_user_playlists(uid)
+        if not playlists:
+            return uid, nickname, [], ""
+
+        for pl in playlists:
+            pl_id = str(pl.get("id", ""))
+            pl_name = (pl.get("name") or "歌单").strip()
+            if not pl_id:
+                continue
+            detail_tracks = await self.netease_playlist_detail(pl_id)
+            if detail_tracks:
+                return uid, nickname, detail_tracks, pl_name
+        return uid, nickname, [], playlists[0].get("name", "歌单") if playlists else ""
+
+    def _analyze_tracks(self, tracks: list[dict], top_n: int = 15) -> str:
+        """
+        对曲目列表做统计分析：总数、歌手分布（出现次数 Top N）、简要偏好描述。
+        """
+        if not tracks:
+            return "曲目为空，无法分析。"
+
+        total = len(tracks)
+        artist_count: dict[str, int] = {}
+        for t in tracks:
+            artists_str = (t.get("artists") or "").strip()
+            if not artists_str:
+                continue
+            for name in artists_str.split("、"):
+                name = name.strip()
+                if name:
+                    artist_count[name] = artist_count.get(name, 0) + 1
+
+        lines = [
+            f"📊 **歌单概况**",
+            f"- 曲目总数：{total} 首",
+            "",
+        ]
+
+        if artist_count:
+            sorted_artists = sorted(
+                artist_count.items(), key=lambda x: -x[1]
+            )[:top_n]
+            lines.append("🎤 **歌手分布（按出现次数 Top %d）**" % len(sorted_artists))
+            for i, (artist, count) in enumerate(sorted_artists, 1):
+                pct = round(100 * count / total, 1) if total else 0
+                lines.append(f"  {i}. {artist}：{count} 首（{pct}%）")
+            lines.append("")
+
+            top1 = sorted_artists[0]
+            if len(sorted_artists) >= 2:
+                top2 = sorted_artists[1]
+                lines.append(
+                    f"💡 **偏好简述**：最常出现的是「{top1[0]}」（{top1[1]} 首），"
+                    f"其次是「{top2[0]}」（{top2[1]} 首）；共涉及 {len(artist_count)} 位歌手/组合。"
+                )
+            else:
+                lines.append(f"💡 **偏好简述**：歌单中出现最多的是「{top1[0]}」（{top1[1]} 首）。")
+        else:
+            lines.append("（暂无歌手信息，无法统计分布）")
+
+        return "\n".join(lines)
+
     # ---------- LLM 工具 ----------
     @filter.llm_tool(name="play_netease_song_by_name")
     async def play_netease_song_by_name(
@@ -423,56 +514,16 @@ class MusicPluginEnhanced(Star):
             yield event.plain_result("请提供网易云用户昵称或用户ID哦~")
             return
 
-        # 规范参数：去掉句首「用户」字样，避免 LLM 传入「用户acane麦外敷」导致搜索不一致
-        raw = user_identifier.strip()
-        for prefix in ("用户", "网易云用户", "网易云 "):
-            if raw.startswith(prefix):
-                raw = raw[len(prefix):].strip()
-                break
+        raw = self._normalize_user_identifier(user_identifier)
         if not raw:
             yield event.plain_result("请提供网易云用户昵称或用户ID哦~")
             return
 
         chat_k = _chat_key(event)
-
-        # 若为纯数字视为 uid
-        if raw.isdigit():
-            uid = raw
-            nickname = raw
-        else:
-            users = await self.netease_search_user(raw, limit=5)
-            if not users:
-                yield event.plain_result(f"未找到网易云用户「{raw}」")
-                return
-            uid = users[0]["userId"]
-            nickname = users[0]["nickname"]
-
-        playlists = await self.netease_user_playlists(uid)
-        if not playlists:
-            yield event.plain_result("该用户暂无公开歌单或「喜欢」列表不可用")
+        uid, nickname, tracks, _pl_name = await self._get_user_liked_playlist_tracks(user_identifier)
+        if uid is None and not tracks:
+            yield event.plain_result(f"未找到网易云用户「{raw}」")
             return
-
-        # 依次尝试歌单：优先「我喜欢的音乐」（第一个），若为空则尝试后续公开歌单（网易云未登录时常不返回「喜欢」曲目）
-        tracks = []
-        for pl in playlists:
-            pl_id = str(pl.get("id", ""))
-            pl_name = (pl.get("name") or "歌单").strip()
-            if not pl_id:
-                continue
-            detail_tracks = await self.netease_playlist_detail(pl_id)
-            if detail_tracks:
-                tracks = detail_tracks
-                if pl is playlists[0]:
-                    logger.info(f"[NetEaseMusicEnhanced] 用户 {nickname}({uid}) 使用「我喜欢的音乐」")
-                else:
-                    logger.info(f"[NetEaseMusicEnhanced] 用户 {nickname}「我喜欢的音乐」无曲目，改用歌单「{pl_name}」")
-                break
-            if pl is playlists[0]:
-                logger.warning(
-                    f"[NetEaseMusicEnhanced] 用户 {nickname}({uid}) 歌单「{pl_name}」返回 0 首，"
-                    "可能为隐私或未登录无法获取，将尝试其他歌单"
-                )
-
         if not tracks:
             yield event.plain_result(
                 "该用户的歌单暂时无法获取（网易云「我喜欢的音乐」多为隐私，未登录时无法读取）。"
@@ -507,6 +558,43 @@ class MusicPluginEnhanced(Star):
             logger.error(f"发送音乐卡片失败: {e}")
             yield event.plain_result("抱歉，发送失败了")
             return
+
+    @filter.llm_tool(name="analyze_netease_user_liked_music")
+    async def analyze_netease_user_liked_music(
+        self, event: AiocqhttpMessageEvent, user_identifier: str
+    ) -> MessageEventResult:
+        """
+        当用户想了解「某个网易云用户的听歌偏好」「某人喜欢的音乐分析」「某人歌单统计」时调用此工具。
+        会获取该用户「我喜欢的音乐」（或第一个有曲目的公开歌单），并分析曲目总数、歌手分布、偏好简述等。
+        示例：用户说「分析一下 acane麦外敷 的歌单」「统计用户 张三 的听歌喜好」→ 传入对应用户昵称或ID。
+        Args:
+            user_identifier(string): 网易云用户昵称或用户ID（纯数字）。仅传昵称/ID，不要包含「用户」等前缀。
+        """
+        if not user_identifier or not user_identifier.strip():
+            yield event.plain_result("请提供网易云用户昵称或用户ID哦~")
+            return
+
+        raw = self._normalize_user_identifier(user_identifier)
+        if not raw:
+            yield event.plain_result("请提供网易云用户昵称或用户ID哦~")
+            return
+
+        uid, nickname, tracks, pl_name = await self._get_user_liked_playlist_tracks(user_identifier)
+        if uid is None and not tracks:
+            yield event.plain_result(f"未找到网易云用户「{raw}」")
+            return
+        if not tracks:
+            yield event.plain_result(
+                "该用户的歌单暂时无法获取，无法进行分析。"
+                "可尝试其他网易云用户，或请该用户将「我喜欢的音乐」设为公开。"
+            )
+            return
+
+        summary = self._analyze_tracks(tracks, top_n=15)
+        title_line = f"📋 网易云用户 **{nickname}** 的歌单分析（歌单：{pl_name}）\n\n"
+        yield event.plain_result(title_line + summary)
+        logger.info(f"[NetEaseMusicEnhanced] 已输出用户 {nickname}({uid}) 歌单分析，共 {len(tracks)} 首")
+        return
 
     async def terminate(self):
         if self.session:
